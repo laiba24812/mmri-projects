@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 import re
 
-API_KEY = "OWQyNzc1NTItNTkzZS00NWRlLTliM2EtYTNhNzJjZmZhZWY1"
+API_KEY = os.getenv("CLOCKIFY_API_KEY")
 WORKSPACE_ID = "5d31e75e59da6530a30fc2f1"
 
 headers = {"X-Api-Key": API_KEY}
