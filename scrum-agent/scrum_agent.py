@@ -2,18 +2,84 @@ import streamlit as st
 import anthropic
 import json
 import xlwings as xw
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
-client = anthropic.Anthropic(api_key="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")
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-# File mapping for each employee
 EMPLOYEE_FILES = {
     "brady semple": "C:/Users/laiba/Downloads/MpalChatbot/Project Tracker - Brady Semple.xlsm",
     "kristin bennett": "C:/Users/laiba/Downloads/MpalChatbot/Project Tracker - Kristin BennettV3testing.xlsm",
 }
 
-st.set_page_config(page_title="MMRI Scrum Agent", page_icon="🤖")
-st.title("🤖 MMRI Daily Scrum Agent")
-st.caption("Your 2-minute daily project update assistant")
+st.set_page_config(page_title="MMRI Scrum Agent", page_icon="🤖", layout="wide")
+
+# McMaster branding CSS
+st.markdown("""
+    <style>
+        .stApp { background-color: #1a1a1a; }
+        .header {
+            background-color: #7A003C;
+            padding: 20px 30px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+        .header h1 { color: #FDBF57; font-size: 24px; margin: 0; }
+        .header p { color: #ffffff; margin: 0; font-size: 13px; opacity: 0.85; }
+        .stButton > button {
+            background-color: #2a2a2a;
+            color: #FDBF57;
+            border: 1px solid #7A003C;
+            border-radius: 20px;
+            padding: 6px 16px;
+            font-size: 13px;
+        }
+        .stButton > button:hover {
+            background-color: #7A003C;
+            color: white;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# Header
+st.markdown("""
+    <div class="header">
+        <h1>🤖 MMRI Daily Scrum Agent</h1>
+        <p>McMaster Manufacturing Research Institute · Your 2-minute daily project update assistant</p>
+    </div>
+""", unsafe_allow_html=True)
+
+# Sidebar
+with st.sidebar:
+    st.markdown("### 👥 Employees")
+    st.markdown("""
+    - Brady Semple
+    - Kristin Bennett
+    - Darren Feenstra
+    - Kevin
+    - Patrick Chin
+    - Mahdi
+    - Steve
+    """)
+    
+    st.markdown("---")
+    st.markdown("### 📋 Instructions")
+    st.markdown("""
+    1. Click **Start Daily Scrum**
+    2. Answer the agent's questions
+    3. Click **Export to Excel** when done
+    """)
+    
+    st.markdown("---")
+    st.markdown("### ⏱️ Takes about 2 minutes")
+    
+    st.markdown("---")
+    if st.button("🗑️ Clear Chat"):
+        st.session_state.conversation = []
+        st.session_state.started = False
+        st.session_state.updates_ready = False
+        st.rerun()
 
 if "conversation" not in st.session_state:
     st.session_state.conversation = []
@@ -58,7 +124,7 @@ for message in st.session_state.conversation:
         st.write(message["content"])
 
 if not st.session_state.started:
-    if st.button("Start Daily Scrum"):
+    if st.button("▶️ Start Daily Scrum"):
         st.session_state.started = True
         opening = "Hi! I'm your MMRI Scrum Agent 👋 I'll help you log your daily project updates in about 2 minutes. Let's get started!\n\nFirst, what's your name?"
         st.session_state.conversation.append({"role": "assistant", "content": opening})
@@ -73,15 +139,16 @@ if user_input and st.session_state.started:
         st.write(user_input)
 
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=512,
-                system=SYSTEM_PROMPT,
-                messages=st.session_state.conversation
-            )
-            assistant_message = response.content[0].text
-            st.write(assistant_message)
+        response_placeholder = st.empty()
+        response_placeholder.write("Agent is processing... 🤖")
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=512,
+            system=SYSTEM_PROMPT,
+            messages=st.session_state.conversation
+        )
+        assistant_message = response.content[0].text
+        response_placeholder.write(assistant_message)
 
     st.session_state.conversation.append({"role": "assistant", "content": assistant_message})
 
@@ -90,7 +157,17 @@ if user_input and st.session_state.started:
 
 if st.session_state.get("updates_ready"):
     st.success("✅ Updates collected! Ready to export to Excel.")
-    if st.button("Export to Excel"):
+    
+    # Show summary
+    st.markdown("### 📋 Session Summary")
+    for msg in st.session_state.conversation:
+        if msg["role"] == "user":
+            st.markdown(f"**You:** {msg['content']}")
+        else:
+            if "UPDATES_COMPLETE" not in msg["content"]:
+                st.markdown(f"**Agent:** {msg['content']}")
+    
+    if st.button("📤 Export to Excel"):
         with st.spinner("Extracting and exporting..."):
             extraction_response = client.messages.create(
                 model="claude-haiku-4-5-20251001",
@@ -133,8 +210,6 @@ Return ONLY a JSON object like this, no other text:
                 }]
             )
 
-            st.write("Raw response:", extraction_response.content[0].text)
-
             try:
                 raw_text = extraction_response.content[0].text
                 clean_text = raw_text.replace("```json", "").replace("```", "").strip()
@@ -150,22 +225,21 @@ Return ONLY a JSON object like this, no other text:
                 else:
                     wb = xw.Book(file_path)
                     ws = wb.sheets["ProjectTracker"]
-                    st.write("Sheet found! Last used row:", ws.cells(200, 1).end('up').row)
 
                     for update in data.get("updates", []):
-                        for row in range(12, 200):
+                        for row in range(14, 200):
                             cell_value = ws.cells(row, 1).value
                             if cell_value == update["project_code"]:
-                                ws.cells(row, 8).value = update["status"]
-                                ws.cells(row, 9).value = update["percent_complete"] / 100
-                                ws.cells(row, 10).value = ws.cells(row, 10).value + update["hours_today"]
+                                ws.cells(row, 7).value = update["status"]
+                                ws.cells(row, 8).value = update["percent_complete"] / 100
+                                ws.cells(row, 9).value = ws.cells(row, 9).value + update["hours_today"]
                                 if update["blockers"] and update["blockers"].lower() != "none":
-                                    ws.cells(row, 11).value = update["blockers"]
+                                    ws.cells(row, 12).value = update["blockers"]
                                 break
 
                     for new_proj in data.get("new_projects", []):
-                        for row in range(12, 200):
-                            if ws.cells(row, 1).value is None:
+                        for row in range(14, 200):
+                            if ws.cells(row, 1).value is None and ws.cells(row, 2).value is None and ws.cells(row, 3).value is None:
                                 ws.cells(row, 1).value = new_proj["project_code"]
                                 ws.cells(row, 2).value = new_proj["task"]
                                 ws.cells(row, 4).value = new_proj["start_date"]
@@ -174,9 +248,8 @@ Return ONLY a JSON object like this, no other text:
                                 ws.cells(row, 7).value = new_proj["status"]
                                 ws.cells(row, 8).value = new_proj["percent_complete"] / 100
                                 ws.cells(row, 9).value = new_proj["hours_complete"]
-                                ws.cells(row, 10).value = new_proj["priority"]
-                                if new_proj["blockers"] and new_proj["blockers"].lower() != "none":
-                                    ws.cells(row, 11).value = new_proj["blockers"]
+                                ws.cells(row, 11).value = new_proj["priority"]
+                                ws.cells(row, 12).value = new_proj["blockers"] if new_proj["blockers"].lower() != "none" else ""
                                 break
 
                     wb.save()
