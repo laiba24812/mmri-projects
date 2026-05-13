@@ -1,7 +1,8 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import anthropic
 import streamlit as st
-
 import requests
 from bs4 import BeautifulSoup
 
@@ -9,17 +10,14 @@ def scrape_mmri_page(url):
     try:
         response = requests.get(url, timeout=10)
         soup = BeautifulSoup(response.content, 'html.parser')
-        # Remove scripts and styles
         for script in soup(["script", "style", "nav", "footer", "header"]):
             script.decompose()
         text = soup.get_text(separator=' ', strip=True)
-        # Clean up whitespace
         lines = [line.strip() for line in text.splitlines() if line.strip()]
-        return ' '.join(lines)[:3000]  # Limit to 3000 chars per page
+        return ' '.join(lines)[:3000]
     except:
         return ""
 
-# Scrape MMRI pages on startup
 @st.cache_data
 def get_mmri_content():
     urls = [
@@ -38,24 +36,19 @@ def get_mmri_content():
 
 mmri_content = get_mmri_content()
 
-client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-# Page config
 st.set_page_config(
     page_title="MMRI Lab Assistant",
     page_icon="🔬",
     layout="centered"
 )
 
-# McMaster branding CSS
 st.markdown("""
     <style>
-        /* Background */
         .stApp {
             background-color: #1a1a1a;
         }
-        
-        /* Header bar */
         .header {
             background-color: #7A003C;
             padding: 20px 30px;
@@ -77,22 +70,16 @@ st.markdown("""
             font-size: 13px;
             opacity: 0.85;
         }
-
-        /* Chat messages */
         .stChatMessage {
             background-color: #2a2a2a;
             border-radius: 10px;
             padding: 10px;
             margin-bottom: 8px;
         }
-
-        /* Input box */
         .stChatInputContainer {
             border-top: 2px solid #7A003C;
             padding-top: 10px;
         }
-
-        /* Suggestion buttons */
         .stButton > button {
             background-color: #2a2a2a;
             color: #FDBF57;
@@ -106,8 +93,6 @@ st.markdown("""
             background-color: #7A003C;
             color: white;
         }
-
-        /* Footer */
         .footer {
             text-align: center;
             color: #666;
@@ -117,7 +102,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Header
 st.markdown("""
     <div class="header">
         <div>
@@ -127,7 +111,6 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# Sidebar
 with st.sidebar:
     st.image("https://www.eng.mcmaster.ca/wp-content/uploads/2022/09/MMRI-Logo.png", width=200)
     st.markdown("### 📞 Contact MMRI")
@@ -140,10 +123,10 @@ with st.sidebar:
     **Hours:** Mon-Fri 8:30am-4:30pm  
     **Email:** mmri-ad@mcmaster.ca
     """)
-    
+
     st.markdown("---")
     st.markdown("### 💡 Suggested Questions")
-    
+
     if st.button("What does MPAL do?"):
         st.session_state.starter = "What does MPAL do?"
     if st.button("What facilities are available?"):
@@ -154,13 +137,22 @@ with st.sidebar:
         st.session_state.starter = "What industries do you work with?"
     if st.button("What training programs are offered?"):
         st.session_state.starter = "What training programs are offered?"
+
+    st.markdown("---")
+    st.markdown("### 🏭 MPAL Team")
+    st.markdown("""
+    **Head:** Darren Feenstra
     
+    **Team Members:**
+    - Laiba Yousafzai
+    - Mahdi
+    """)
+
     st.markdown("---")
     if st.button("🗑️ Clear Chat"):
         st.session_state.conversation = []
         st.rerun()
 
-# System prompt
 SYSTEM_PROMPT = f"""You are a helpful assistant for the Materials Property Assessment Lab (MPAL) 
 at the McMaster Manufacturing Research Institute (MMRI). Answer questions accurately based on the following information:
 
@@ -204,11 +196,9 @@ STUDY & TRAINING:
 
 If asked something not covered here, say you'll check with the lab team and direct them to contact MMRI directly."""
 
-# Initialize conversation
 if "conversation" not in st.session_state:
     st.session_state.conversation = []
 
-# Suggestion buttons (only show if no conversation yet)
 if not st.session_state.conversation:
     st.markdown("**💡 Try asking:**")
     col1, col2, col3 = st.columns(3)
@@ -222,21 +212,16 @@ if not st.session_state.conversation:
         if st.button("What industries do you work with?"):
             st.session_state.starter = "What industries do you work with?"
 
-# Display conversation
 for message in st.session_state.conversation:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# Always show chat input
 user_input = st.chat_input("Ask a question about MPAL or MMRI...")
 
-# Handle starter button clicks
 if not user_input and "starter" in st.session_state and st.session_state.starter:
     user_input = st.session_state.starter
     st.session_state.starter = None
 
-# Process input
-# Process input
 if user_input:
     st.session_state.conversation.append({
         "role": "user",
@@ -250,7 +235,7 @@ if user_input:
         response_placeholder = st.empty()
         response_placeholder.write("MMRI Assistant is thinking... 🔬")
         full_response = ""
-        
+
         with client.messages.stream(
             model="claude-opus-4-6",
             max_tokens=1024,
@@ -267,7 +252,6 @@ if user_input:
         "content": full_response
     })
 
-# Footer
 st.markdown("""
     <div class="footer">
         McMaster Manufacturing Research Institute · 230 Longwood Rd S, Hamilton ON · 905-525-9140
