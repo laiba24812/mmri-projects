@@ -6,16 +6,23 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+@st.cache_resource
+def get_client():
+    return anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+client = get_client()
 
 EMPLOYEE_FILES = {
     "brady semple": "C:/Users/laiba/Downloads/MpalChatbot/Project Tracker - Brady Semple.xlsm",
     "kristin bennett": "C:/Users/laiba/Downloads/MpalChatbot/Project Tracker - Kristin BennettV3testing.xlsm",
 }
 
+VALID_PROJECT_CODES = [
+    "TYCOS12","HONDA30", "HONDA58", "ORF0", "vAMC1", "HONDA79", "ENEDYM1", "HONDA75", "HONDA76",
+]
+
 st.set_page_config(page_title="MMRI Scrum Agent", page_icon="🤖", layout="wide")
 
-# McMaster branding CSS
 st.markdown("""
     <style>
         .stApp { background-color: #1a1a1a; }
@@ -42,7 +49,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Header
 st.markdown("""
     <div class="header">
         <h1>🤖 MMRI Daily Scrum Agent</h1>
@@ -50,7 +56,6 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# Sidebar
 with st.sidebar:
     st.markdown("### 👥 Employees")
     st.markdown("""
@@ -62,7 +67,6 @@ with st.sidebar:
     - Mahdi
     - Steve
     """)
-    
     st.markdown("---")
     st.markdown("### 📋 Instructions")
     st.markdown("""
@@ -70,10 +74,8 @@ with st.sidebar:
     2. Answer the agent's questions
     3. Click **Export to Excel** when done
     """)
-    
     st.markdown("---")
     st.markdown("### ⏱️ Takes about 2 minutes")
-    
     st.markdown("---")
     if st.button("🗑️ Clear Chat"):
         st.session_state.conversation = []
@@ -87,7 +89,20 @@ if "conversation" not in st.session_state:
     st.session_state.started = False
     st.session_state.updates_ready = False
 
-SYSTEM_PROMPT = """You are a friendly scrum agent for the MMRI lab at McMaster University. 
+SCRUM_STEPS = ["Name", "Project Type", "Project Details", "Blockers", "Complete"]
+
+def get_progress(conversation):
+    if not conversation:
+        return 0
+    msg_count = len([m for m in conversation if m["role"] == "user"])
+    return min(msg_count / 5, 1.0)
+
+progress = get_progress(st.session_state.conversation)
+step_index = min(int(progress * len(SCRUM_STEPS)), len(SCRUM_STEPS) - 1)
+st.markdown(f"**Scrum Progress:** {SCRUM_STEPS[step_index]}")
+st.progress(progress)
+
+SYSTEM_PROMPT = f"""You are a friendly scrum agent for the MMRI lab at McMaster University. 
 Your job is to conduct a quick 2-minute daily standup with each employee.
 
 Ask these questions one at a time in a friendly conversational way:
@@ -95,27 +110,34 @@ Ask these questions one at a time in a friendly conversational way:
 2. Are you updating an existing project or adding a new project?
 
 If UPDATING an existing project, ask:
-- Which project code?
+- Which project code? (refer to the valid project codes list below)
 - What is your current % complete?
 - How many hours did you spend on it today?
-- What is the status? (In Progress, Future Work, or Complete)
+- What is the status? Give them these exact options to choose from:
+  Complete, In Progress, Delay, Future Work
 - Any blockers or risks?
 
 If adding a NEW project, ask:
-- Project code?
+- Project code? (refer to the valid project codes list below)
 - Task name?
 - Start date?
 - End date?
 - Estimated hours?
-- Current status? (In Progress, Future Work, or Complete)
+- Current status? Give them these exact options:
+  Complete, In Progress, Delay, Future Work
 - Current % complete?
 - Hours complete so far?
-- Priority? (High, Medium, Low)
+- Priority? Give them these exact options:
+  High, Medium, Low
 - Any blockers or risks?
 
-You can handle multiple projects in one session. After each project ask "Any other projects to update or add?"
-
+After each project ask "Any other projects to update or add?"
 Once done with all projects say UPDATES_COMPLETE.
+
+VALID PROJECT CODES (match employee input to one of these):
+{", ".join(VALID_PROJECT_CODES)}
+
+If an employee mentions a project that doesn't match a code, ask them to confirm which code it corresponds to.
 
 Be friendly, concise and professional. Keep responses short."""
 
@@ -157,8 +179,7 @@ if user_input and st.session_state.started:
 
 if st.session_state.get("updates_ready"):
     st.success("✅ Updates collected! Ready to export to Excel.")
-    
-    # Show summary
+
     st.markdown("### 📋 Session Summary")
     for msg in st.session_state.conversation:
         if msg["role"] == "user":
@@ -166,7 +187,7 @@ if st.session_state.get("updates_ready"):
         else:
             if "UPDATES_COMPLETE" not in msg["content"]:
                 st.markdown(f"**Agent:** {msg['content']}")
-    
+
     if st.button("📤 Export to Excel"):
         with st.spinner("Extracting and exporting..."):
             extraction_response = client.messages.create(
@@ -185,7 +206,7 @@ Return ONLY a JSON object like this, no other text:
         {{
             "type": "update",
             "project_code": "code",
-            "status": "In Progress/Future Work/Complete",
+            "status": "In Progress",
             "percent_complete": 50,
             "hours_today": 2,
             "blockers": "any blockers or none"
@@ -199,14 +220,21 @@ Return ONLY a JSON object like this, no other text:
             "start_date": "DD/MM/YYYY",
             "end_date": "DD/MM/YYYY",
             "estimated_hours": 100,
-            "status": "In Progress/Future Work/Complete",
+            "status": "In Progress",
             "percent_complete": 0,
             "hours_complete": 0,
-            "priority": "High/Medium/Low",
+            "priority": "High",
             "blockers": "any blockers or none"
         }}
     ]
-}}"""
+}}
+
+STRICT RULES:
+- status must be EXACTLY one of: Complete, In Progress, Delay, Future Work
+- priority must be EXACTLY one of: High, Medium, Low
+- project_code must match one of the valid codes from the conversation
+- Do not use any other values for these fields
+- Do not include any markdown or extra text, just the JSON"""
                 }]
             )
 
@@ -221,40 +249,46 @@ Return ONLY a JSON object like this, no other text:
                 file_path = EMPLOYEE_FILES.get(employee_name)
 
                 if not file_path:
-                    st.error(f"No Excel file found for {data['employee_name']}.")
+                    st.error(f"No Excel file found for {data['employee_name']}. Make sure the name matches exactly.")
                 else:
                     wb = xw.Book(file_path)
                     ws = wb.sheets["ProjectTracker"]
 
                     for update in data.get("updates", []):
                         for row in range(14, 200):
-                            cell_value = ws.cells(row, 1).value
-                            if cell_value == update["project_code"]:
-                                ws.cells(row, 7).value = update["status"]
-                                ws.cells(row, 8).value = update["percent_complete"] / 100
-                                ws.cells(row, 9).value = ws.cells(row, 9).value + update["hours_today"]
+                            if ws.cells(row, 3).value == update["project_code"]:
+                                ws.cells(row, 9).api.Validation.Delete()
+                                ws.cells(row, 9).value = update["status"]
+                                ws.cells(row, 10).value = update["percent_complete"] / 100
+                                current_hours = ws.cells(row, 11).value or 0
+                                ws.cells(row, 11).value = current_hours + update["hours_today"]
                                 if update["blockers"] and update["blockers"].lower() != "none":
-                                    ws.cells(row, 12).value = update["blockers"]
+                                    ws.cells(row, 14).value = update["blockers"]
                                 break
 
                     for new_proj in data.get("new_projects", []):
                         for row in range(14, 200):
-                            if ws.cells(row, 1).value is None and ws.cells(row, 2).value is None and ws.cells(row, 3).value is None:
-                                ws.cells(row, 1).value = new_proj["project_code"]
-                                ws.cells(row, 2).value = new_proj["task"]
-                                ws.cells(row, 4).value = new_proj["start_date"]
-                                ws.cells(row, 5).value = new_proj["end_date"]
-                                ws.cells(row, 6).value = new_proj["estimated_hours"]
-                                ws.cells(row, 7).value = new_proj["status"]
-                                ws.cells(row, 8).value = new_proj["percent_complete"] / 100
-                                ws.cells(row, 9).value = new_proj["hours_complete"]
-                                ws.cells(row, 11).value = new_proj["priority"]
-                                ws.cells(row, 12).value = new_proj["blockers"] if new_proj["blockers"].lower() != "none" else ""
+                            if ws.cells(row, 3).value is None:
+                                ws.cells(row, 3).value = new_proj["project_code"]
+                                ws.cells(row, 4).value = new_proj["task"]
+                                ws.cells(row, 6).value = new_proj["start_date"]
+                                ws.cells(row, 7).value = new_proj["end_date"]
+                                ws.cells(row, 8).value = new_proj["estimated_hours"]
+                                ws.cells(row, 9).api.Validation.Delete()
+                                ws.cells(row, 9).value = new_proj["status"]
+                                ws.cells(row, 10).value = new_proj["percent_complete"] / 100
+                                ws.cells(row, 11).value = new_proj["hours_complete"]
+                                ws.cells(row, 13).api.Validation.Delete()
+                                ws.cells(row, 13).value = new_proj["priority"]
+                                ws.cells(row, 14).value = new_proj["blockers"] if new_proj["blockers"].lower() != "none" else ""
                                 break
 
                     wb.save()
                     st.success(f"✅ Excel file updated for {data['employee_name']}!")
+                    st.balloons()
                     st.session_state.updates_ready = False
 
+            except json.JSONDecodeError:
+                st.error("Could not parse the extracted data. Please try exporting again.")
             except Exception as e:
                 st.error(f"Could not update Excel file: {e}")
