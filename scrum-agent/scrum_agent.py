@@ -1,7 +1,7 @@
 import streamlit as st
 import anthropic
 import json
-import xlwings as xw
+import openpyxl
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -18,7 +18,7 @@ EMPLOYEE_FILES = {
 }
 
 VALID_PROJECT_CODES = [
-    "TYCOS12","HONDA30", "HONDA58", "ORF0", "vAMC1", "HONDA79", "ENEDYM1", "HONDA75", "HONDA76",
+    "HONDA30", "HONDA58", "ORF0", "vAMC1", "HONDA79", "ENEDYM1", "HONDA75", "HONDA76",
 ]
 
 st.set_page_config(page_title="MMRI Scrum Agent", page_icon="🤖", layout="wide")
@@ -165,7 +165,7 @@ if user_input and st.session_state.started:
         response_placeholder.write("Agent is processing... 🤖")
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=512,
+            max_tokens=256,
             system=SYSTEM_PROMPT,
             messages=st.session_state.conversation
         )
@@ -251,39 +251,36 @@ STRICT RULES:
                 if not file_path:
                     st.error(f"No Excel file found for {data['employee_name']}. Make sure the name matches exactly.")
                 else:
-                    wb = xw.Book(file_path)
-                    ws = wb.sheets["ProjectTracker"]
+                    wb = openpyxl.load_workbook(file_path, keep_vba=True)
+                    ws = wb["ProjectTracker"]
 
                     for update in data.get("updates", []):
                         for row in range(14, 200):
-                            if ws.cells(row, 3).value == update["project_code"]:
-                                ws.cells(row, 9).api.Validation.Delete()
-                                ws.cells(row, 9).value = update["status"]
-                                ws.cells(row, 10).value = update["percent_complete"] / 100
-                                current_hours = ws.cells(row, 11).value or 0
-                                ws.cells(row, 11).value = current_hours + update["hours_today"]
+                            if ws.cell(row=row, column=3).value == update["project_code"]:
+                                ws.cell(row=row, column=9).value = update["status"]
+                                ws.cell(row=row, column=10).value = update["percent_complete"] / 100
+                                current_hours = ws.cell(row=row, column=11).value or 0
+                                ws.cell(row=row, column=11).value = current_hours + update["hours_today"]
                                 if update["blockers"] and update["blockers"].lower() != "none":
-                                    ws.cells(row, 14).value = update["blockers"]
+                                    ws.cell(row=row, column=14).value = update["blockers"]
                                 break
 
                     for new_proj in data.get("new_projects", []):
                         for row in range(14, 200):
-                            if ws.cells(row, 3).value is None:
-                                ws.cells(row, 3).value = new_proj["project_code"]
-                                ws.cells(row, 4).value = new_proj["task"]
-                                ws.cells(row, 6).value = new_proj["start_date"]
-                                ws.cells(row, 7).value = new_proj["end_date"]
-                                ws.cells(row, 8).value = new_proj["estimated_hours"]
-                                ws.cells(row, 9).api.Validation.Delete()
-                                ws.cells(row, 9).value = new_proj["status"]
-                                ws.cells(row, 10).value = new_proj["percent_complete"] / 100
-                                ws.cells(row, 11).value = new_proj["hours_complete"]
-                                ws.cells(row, 13).api.Validation.Delete()
-                                ws.cells(row, 13).value = new_proj["priority"]
-                                ws.cells(row, 14).value = new_proj["blockers"] if new_proj["blockers"].lower() != "none" else ""
+                            if ws.cell(row=row, column=3).value is None:
+                                ws.cell(row=row, column=3).value = new_proj["project_code"]
+                                ws.cell(row=row, column=4).value = new_proj["task"]
+                                ws.cell(row=row, column=6).value = new_proj["start_date"]
+                                ws.cell(row=row, column=7).value = new_proj["end_date"]
+                                ws.cell(row=row, column=8).value = new_proj["estimated_hours"]
+                                ws.cell(row=row, column=9).value = new_proj["status"]
+                                ws.cell(row=row, column=10).value = new_proj["percent_complete"] / 100
+                                ws.cell(row=row, column=11).value = new_proj["hours_complete"]
+                                ws.cell(row=row, column=13).value = new_proj["priority"]
+                                ws.cell(row=row, column=14).value = new_proj["blockers"] if new_proj["blockers"].lower() != "none" else ""
                                 break
 
-                    wb.save()
+                    wb.save(file_path)
                     st.success(f"✅ Excel file updated for {data['employee_name']}!")
                     st.balloons()
                     st.session_state.updates_ready = False
