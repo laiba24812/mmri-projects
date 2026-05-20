@@ -1,8 +1,9 @@
 import streamlit as st
 import anthropic
 import json
-import openpyxl
+import xlwings as xw
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -18,7 +19,12 @@ EMPLOYEE_FILES = {
 }
 
 VALID_PROJECT_CODES = [
-    "HONDA30", "HONDA58", "ORF0", "vAMC1", "HONDA79", "ENEDYM1", "HONDA75", "HONDA76",
+    "MCS1","INCORPAI1","TYCOS12","HONDA30", "HONDA58", "ORF0", "vAMC1", "HONDA79", "ENEDYM1", "HONDA75", "HONDA76",
+    "HONDA86", "HONDA53", "HONDA89", "vRSC11", "vRSC12", "vRSC13", "HONDA98",
+    "HONDA78", "LONGAN2", "HONDA103", "ALCHEMY5", "HONDACBM1", "QUICKMILL2",
+    "COLLINS1", "HONDA130", "AXYZ3", "MEVOTECH5", "GASTRO2", "HONDACBM6",
+    "HONDA119", "RACER2", "TUPY1", "SMARTCN1", "OLIGO3", "MHI1", "HONDA122",
+    "HONDA123", "ABERGER3"
 ]
 
 st.set_page_config(page_title="MMRI Scrum Agent", page_icon="🤖", layout="wide")
@@ -139,6 +145,14 @@ VALID PROJECT CODES (match employee input to one of these):
 
 If an employee mentions a project that doesn't match a code, ask them to confirm which code it corresponds to.
 
+Be friendly, concise and professional. Keep responses short.
+
+Once you know the employee's name, use it naturally throughout the conversation to make it feel personal. For example "Great, thanks Brady!" or "Got it Kristin, what's the status?".
+
+Be friendly, concise and professional. Keep responses short.
+
+If an employee says they worked more than 12 hours on a project in one day, flag it and ask them to confirm. For example "Just to confirm, you worked 15 hours on that today? That seems like a lot — can you double check that number?".
+
 Be friendly, concise and professional. Keep responses short."""
 
 for message in st.session_state.conversation:
@@ -146,13 +160,24 @@ for message in st.session_state.conversation:
         st.write(message["content"])
 
 if not st.session_state.started:
-    if st.button("▶️ Start Daily Scrum"):
-        st.session_state.started = True
-        opening = "Hi! I'm your MMRI Scrum Agent 👋 I'll help you log your daily project updates in about 2 minutes. Let's get started!\n\nFirst, what's your name?"
-        st.session_state.conversation.append({"role": "assistant", "content": opening})
-        st.rerun()
-
-user_input = st.chat_input("Type your response here...")
+    employee = st.selectbox("Select your name:", [
+        "", "Brady Semple", "Kristin Bennett", "Darren Feenstra",
+        "Kevin", "Patrick Chin", "Mahdi", "Steve"
+    ])
+    if st.button("▶️ Start Daily Scrum", key="start_button"):
+        if employee:
+            st.session_state.started = True
+            st.session_state.employee_name = employee
+            opening = f"Hi {employee}! 👋 I'm your MMRI Scrum Agent. I'll help you log your daily project updates in about 2 minutes. Let's get started!\n\nAre you updating an existing project or adding a new one?"
+            st.session_state.conversation.append({"role": "assistant", "content": opening})
+            st.rerun()
+        else:
+            st.warning("Please select your name before starting!")
+            
+if st.session_state.started:
+    user_input = st.chat_input("Type your response here...")
+else:
+    user_input = None
 
 if user_input and st.session_state.started:
     st.session_state.conversation.append({"role": "user", "content": user_input})
@@ -251,39 +276,63 @@ STRICT RULES:
                 if not file_path:
                     st.error(f"No Excel file found for {data['employee_name']}. Make sure the name matches exactly.")
                 else:
-                    wb = openpyxl.load_workbook(file_path, keep_vba=True)
-                    ws = wb["ProjectTracker"]
+                    wb = xw.Book(file_path)
+                    ws = wb.sheets["ProjectTracker"]
+
+                    exported = []
+                    failed = []
 
                     for update in data.get("updates", []):
+                        found = False
                         for row in range(14, 200):
-                            if ws.cell(row=row, column=3).value == update["project_code"]:
-                                ws.cell(row=row, column=9).value = update["status"]
-                                ws.cell(row=row, column=10).value = update["percent_complete"] / 100
-                                current_hours = ws.cell(row=row, column=11).value or 0
-                                ws.cell(row=row, column=11).value = current_hours + update["hours_today"]
+                            if ws.cells(row, 3).value == update["project_code"]:
+                                ws.cells(row, 9).api.Validation.Delete()
+                                ws.cells(row, 9).value = update["status"]
+                                ws.cells(row, 10).value = update["percent_complete"] / 100
+                                current_hours = ws.cells(row, 11).value or 0
+                                ws.cells(row, 11).value = current_hours + update["hours_today"]
                                 if update["blockers"] and update["blockers"].lower() != "none":
-                                    ws.cell(row=row, column=14).value = update["blockers"]
+                                    ws.cells(row, 14).value = update["blockers"]
+                                ws.cells(row, 15).value = datetime.today().strftime('%Y-%m-%d')
+                                exported.append(update["project_code"])
+                                found = True
                                 break
+                        if not found:
+                            failed.append(update["project_code"])
 
                     for new_proj in data.get("new_projects", []):
                         for row in range(14, 200):
-                            if ws.cell(row=row, column=3).value is None:
-                                ws.cell(row=row, column=3).value = new_proj["project_code"]
-                                ws.cell(row=row, column=4).value = new_proj["task"]
-                                ws.cell(row=row, column=6).value = new_proj["start_date"]
-                                ws.cell(row=row, column=7).value = new_proj["end_date"]
-                                ws.cell(row=row, column=8).value = new_proj["estimated_hours"]
-                                ws.cell(row=row, column=9).value = new_proj["status"]
-                                ws.cell(row=row, column=10).value = new_proj["percent_complete"] / 100
-                                ws.cell(row=row, column=11).value = new_proj["hours_complete"]
-                                ws.cell(row=row, column=13).value = new_proj["priority"]
-                                ws.cell(row=row, column=14).value = new_proj["blockers"] if new_proj["blockers"].lower() != "none" else ""
+                            if ws.cells(row, 3).value is None:
+                                ws.cells(row, 3).value = new_proj["project_code"]
+                                ws.cells(row, 4).value = new_proj["task"]
+                                ws.cells(row, 6).value = new_proj["start_date"]
+                                ws.cells(row, 7).value = new_proj["end_date"]
+                                ws.cells(row, 8).value = new_proj["estimated_hours"]
+                                ws.cells(row, 9).api.Validation.Delete()
+                                ws.cells(row, 9).value = new_proj["status"]
+                                ws.cells(row, 10).value = new_proj["percent_complete"] / 100
+                                ws.cells(row, 11).value = new_proj["hours_complete"]
+                                ws.cells(row, 13).api.Validation.Delete()
+                                ws.cells(row, 13).value = new_proj["priority"]
+                                ws.cells(row, 14).value = new_proj["blockers"] if new_proj["blockers"].lower() != "none" else ""
+                                ws.cells(row, 15).value = "'" + datetime.today().strftime('%d/%m/%Y')
+                                exported.append(new_proj["project_code"])
                                 break
 
-                    wb.save(file_path)
-                    st.success(f"✅ Excel file updated for {data['employee_name']}!")
+                    wb.save()
+
+                    if exported:
+                        st.success(f"✅ Successfully exported: {', '.join(exported)}")
+                    if failed:
+                        st.error(f"❌ Could not find these project codes in Excel: {', '.join(failed)}")
+
                     st.balloons()
+                    import time
+                    time.sleep(3)
+                    st.session_state.conversation = []
+                    st.session_state.started = False
                     st.session_state.updates_ready = False
+                    st.rerun()
 
             except json.JSONDecodeError:
                 st.error("Could not parse the extracted data. Please try exporting again.")
