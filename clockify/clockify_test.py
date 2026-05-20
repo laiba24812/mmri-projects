@@ -6,6 +6,15 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+from datetime import datetime, timedelta, timezone
+
+# Date range filter — last 8 weeks
+end_date = datetime.now(timezone.utc)
+start_date = end_date - timedelta(weeks=8)
+start_str = start_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+end_str = end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+print(f"Fetching entries from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+
 API_KEY = os.getenv("CLOCKIFY_API_KEY")
 WORKSPACE_ID = "5d31e75e59da6530a30fc2f1"
 
@@ -71,10 +80,12 @@ for user in users:
     if mapped_name not in MMRI_EMPLOYEES:
         continue
     user_id = user['id']
+    
     entries_response = requests.get(
-        f"https://api.clockify.me/api/v1/workspaces/{WORKSPACE_ID}/user/{user_id}/time-entries",
-        headers=headers
-    )
+    f"https://api.clockify.me/api/v1/workspaces/{WORKSPACE_ID}/user/{user_id}/time-entries",
+    headers=headers,
+    params={"start": start_str, "end": end_str, "page-size": 500}
+)
     entries = entries_response.json()
     for entry in entries:
         project_id = entry.get('projectId', '')
@@ -116,9 +127,10 @@ for user in users:
     print(f"Fetching entries for {mapped_name}...")
 
     entries_response = requests.get(
-        f"https://api.clockify.me/api/v1/workspaces/{WORKSPACE_ID}/user/{user_id}/time-entries",
-        headers=headers
-    )
+    f"https://api.clockify.me/api/v1/workspaces/{WORKSPACE_ID}/user/{user_id}/time-entries",
+    headers=headers,
+    params={"start": start_str, "end": end_str, "page-size": 500}
+)
     entries = entries_response.json()
 
     for entry in entries:
@@ -151,3 +163,23 @@ df = pd.DataFrame(all_entries)
 df.to_csv('clockify_data.csv', index=False)
 print("Done! clockify_data.csv created")
 print(df.head())
+
+def save_weekly_summary(df):
+    summary = df.groupby('Employee')['Hours'].sum().reset_index()
+    summary = summary.sort_values('Hours', ascending=False)
+    
+    body = f"MMRI Weekly Clockify Summary - {datetime.today().strftime('%B %d, %Y')}\n\n"
+    body += "Hours by Employee:\n"
+    for _, row in summary.iterrows():
+        body += f"  - {row['Employee']}: {row['Hours']:.1f} hours\n"
+    
+    body += "\nProject Breakdown:\n"
+    project_summary = df.groupby(['Employee', 'Project'])['Hours'].sum().reset_index()
+    for _, row in project_summary.iterrows():
+        body += f"  - {row['Employee']} | {row['Project']}: {row['Hours']:.1f} hours\n"
+    
+    with open('weekly_summary.txt', 'w') as f:
+        f.write(body)
+    print("✅ Weekly summary saved to weekly_summary.txt!")
+
+save_weekly_summary(df)
